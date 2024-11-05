@@ -5,7 +5,7 @@ from routes import api
 from models import create_connection
 
 # Resource for managing a single product
-class ProductResource(Resource):
+class Product(Resource):
     def get(self):
         product_id = request.args.get('id')
         if not product_id:
@@ -110,7 +110,7 @@ class ProductResource(Resource):
             conn.close()
 
 #Create new product
-class ProductCreateResource(Resource):
+class ProductCreate(Resource):
     def post(self):
         data = request.get_json()
 
@@ -150,7 +150,7 @@ class ProductCreateResource(Resource):
             conn.close()
 
 # Resource for listing products with optional filters
-class ProductListResource(Resource):
+class ProductList(Resource):
     def get(self):
         status = request.args.get('status', None)
         sort_by = request.args.get('sort_by', 'startTime')
@@ -212,13 +212,14 @@ class ProductListResource(Resource):
 ALLOWED_SORT_FIELDS = {'startTime', 'endTime', 'title'}
 ALLOWED_SORT_ORDERS = {'asc', 'desc'}
 
-class CategoryProductsResource(Resource):
+class CategoryProducts(Resource):
     def get(self):
         category_id = request.args.get('categoryId', default=None, type=int)
         status = request.args.get('status', 'live')
         sort_by = request.args.get('sortBy', 'startTime')
         sort_order = request.args.get('sortOrder', 'asc')
         limit = request.args.get('limit', default=5, type=int)  # Convert limit to integer
+        offset = request.args.get('offset', default=None, type=int)
 
         if not category_id:
             return {'error': 'categoryId query parameter is required'}, 400
@@ -254,6 +255,10 @@ class CategoryProductsResource(Resource):
             # Apply limit
             query += " LIMIT %s"
             params.append(limit)
+
+            if offset:
+                query += " OFFSET %s"
+                params.append(offset)
 
             # Debug: Print the final SQL query and parameters
             print(f"Executing Query: {query} with params: {params}")
@@ -308,7 +313,7 @@ class CategoryProductsResource(Resource):
 class TrendingProducts(Resource):
     def get(self):
         # Get the number of products to return from query parameters, default to 2
-        num_products = request.args.get('limit', default=2, type=int)
+        num_products = request.args.get('limit', default=5, type=int)
 
         conn, cursor = None, None
         try:
@@ -477,10 +482,10 @@ class LHTProducts(Resource):
                 conn.close()
 
 # Register resources with the API
-api.add_resource(ProductResource, '/api/v2/products/product')   #id
-api.add_resource(ProductListResource, '/api/v2/products')   #status,limit for getting list of products of specified status
-api.add_resource(ProductCreateResource, '/api/v2/products/create')    #POST for creating product
-api.add_resource(CategoryProductsResource, '/api/v2/categories/products')   #categoryId, sortBy=currentBidPrice, sortOrder=desc (default asc)
+api.add_resource(Product, '/api/v2/products/product')   #id
+api.add_resource(ProductList, '/api/v2/products')   #status,limit for getting list of products of specified status
+api.add_resource(ProductCreate, '/api/v2/products/create')    #POST for creating product
+api.add_resource(CategoryProducts, '/api/v2/categories/products')   #categoryId, sortBy=currentBidPrice, sortOrder=desc (default asc)
                                                                             #limit, status
 api.add_resource(TrendingProducts, '/api/v2/products/trending')    #limit
 api.add_resource(LHTProducts, '/api/products/lht')

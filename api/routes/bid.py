@@ -4,7 +4,7 @@ from mysql.connector import Error
 from models import create_connection
 from routes import api
 
-class BidResource(Resource):
+class Bid(Resource):
     def post(self):
         connection, cursor = None, None
         try:
@@ -70,7 +70,7 @@ class BidResource(Resource):
             if connection:
                 connection.close()
 
-class BidDetailResource(Resource):
+class BidDetail(Resource):
     def get(self):
         bid_id = request.args.get('bidId')
 
@@ -139,7 +139,7 @@ class BidDetailResource(Resource):
             if connection:
                 connection.close()
 
-class ProductBidsResource(Resource):
+class ProductBids(Resource):
     def get(self):
         product_id = request.args.get('productId')
         connection, cursor = None, None
@@ -178,7 +178,7 @@ class ProductBidsResource(Resource):
             if connection:
                 connection.close()
 
-class UserBidsResource(Resource):
+class UserBids(Resource):
     def get(self):
         user_id = request.args.get('userId')
         if not user_id:
@@ -221,7 +221,7 @@ class UserBidsResource(Resource):
             if connection:
                 connection.close()
 
-class ProductHighestBidsResource(Resource):
+class ProductHighestBid(Resource):
     def get(self):
         product_id = request.args.get('productId')
 
@@ -268,8 +268,8 @@ class ProductHighestBidsResource(Resource):
                 connection.close()
 
 # Add the resources to the API
-api.add_resource(BidResource, '/api/v2/bid')
-api.add_resource(BidDetailResource, '/api/v2/bids')
-api.add_resource(ProductBidsResource, '/api/v2/product/bids') #productId
-api.add_resource(UserBidsResource, '/api/v2/users/bids') #userId
-api.add_resource(ProductHighestBidsResource, '/api/v2/product/highestbid') #productId
+api.add_resource(Bid, '/api/v2/bid')
+api.add_resource(BidDetail, '/api/v2/bids')
+api.add_resource(ProductBids, '/api/v2/product/bids') #productId
+api.add_resource(UserBids, '/api/v2/users/bids') #userId
+api.add_resource(ProductHighestBid, '/api/v2/product/highestbid') #productId

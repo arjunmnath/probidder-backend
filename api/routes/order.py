@@ -5,7 +5,7 @@ from models import create_connection
 from routes import api
 
 # Resource for managing user orders
-class UserOrdersResource(Resource):
+class UserOrders(Resource):
     def get(self):
 
         user_id = request.args.get('userId', default=None, type=int)
@@ -113,4 +113,4 @@ class UserOrdersResource(Resource):
             connection.close()
 
 # Register the resource with the API
-api.add_resource(UserOrdersResource, '/api/v2/users/orders')
+api.add_resource(UserOrders, '/api/v2/users/orders')

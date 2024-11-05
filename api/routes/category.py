@@ -4,9 +4,8 @@ from mysql.connector import Error
 from models import create_connection
 from routes import api
 
-class CategoryResource(Resource):
+class Category(Resource):
     def post(self):
-        
         try:
             # Get JSON data from the request
             data = request.get_json()
@@ -46,7 +45,7 @@ class CategoryResource(Resource):
             cursor.close()
             connection.close()
 
-class CategoryDetailResource(Resource):
+class CategoryDetail(Resource):
     def get(self):
         category_id = request.args.get('categoryId')
         try:
@@ -106,5 +105,5 @@ class CategoryDetailResource(Resource):
             connection.close()
 
 # Add the resources to the API
-api.add_resource(CategoryResource, '/api/v2/categories')
-api.add_resource(CategoryDetailResource, '/api/v2/category') #categoryId
+api.add_resource(Category, '/api/v2/categories')
+api.add_resource(CategoryDetail, '/api/v2/category') #categoryId

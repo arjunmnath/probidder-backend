@@ -2,7 +2,6 @@ import mysql.connector
 import os
 from dotenv import load_dotenv
 
-# Function to create a connection to the MySQL database
 def create_connection():
     try:
         load_dotenv()

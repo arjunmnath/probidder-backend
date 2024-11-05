@@ -4,7 +4,7 @@ from mysql.connector import Error
 from routes import api
 from models import create_connection
 
-class ShipmentResource(Resource):
+class Shipment(Resource):
     def get(self):
         shipment_id = request.args.get('shippingId')
         connection, cursor = None, None
@@ -149,4 +149,4 @@ class ShipmentResource(Resource):
                 connection.close()
 
 # Register the resource with the API
-api.add_resource(ShipmentResource, '/api/v2/shipments')
+api.add_resource(Shipment, '/api/v2/shipments')
