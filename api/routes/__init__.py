@@ -5,4 +5,4 @@ appbp = Blueprint('appbp', __name__)
 
 api = Api(appbp)
 
-from api.routes import  bid, category, messages, order, product, review, user
+from api.routes import  bid, category, order, product, user

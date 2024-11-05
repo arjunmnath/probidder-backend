@@ -1,120 +1,140 @@
-from flask_sqlalchemy import SQLAlchemy
-db = SQLAlchemy()
+import mysql.connector
+import os
+from dotenv import load_dotenv
 
-class Category(db.Model):
-    __tablename__ = 'Category'
-    categoryId = db.Column(db.Integer, primary_key=True)
-    categoryName = db.Column(db.String(255), nullable=False)
+# Function to create a connection to the MySQL database
+def create_connection():
+    try:
+        load_dotenv()
+        conn = mysql.connector.connect(
+            host=os.getenv('DB_HOST'),
+            port=os.getenv('DB_PORT'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASS'),
+            database=os.getenv('DB_NAME')
+        )
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+        return None
 
-    products = db.relationship('Product', secondary='Cat_Prod', backref=db.backref('categories', lazy=True))
+def create_tables():
+    try:
+        connection = create_connection()
+        cursor = connection.cursor()
+        
+        queries = [
+            '''
+            CREATE TABLE IF NOT EXISTS Category (
+                categoryId INT AUTO_INCREMENT PRIMARY KEY,
+                categoryName VARCHAR(255) NOT NULL
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS User (
+                userId INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) NOT NULL,
+                phone VARCHAR(15),
+                email VARCHAR(255) NOT NULL UNIQUE,
+                passwdHash VARCHAR(255) NOT NULL,
+                firstName VARCHAR(255) NOT NULL,
+                lastName VARCHAR(255) NOT NULL,
+                houseFlatNo VARCHAR(255),
+                street VARCHAR(255),
+                city VARCHAR(255),
+                pincode VARCHAR(10),
+                dateJoined DATETIME NOT NULL,
+                isVerified BOOLEAN DEFAULT FALSE
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS Product (
+                productId INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                `condition` ENUM('new', 'used', 'refurbished') NOT NULL,
+                initialBid DECIMAL(10, 2) NOT NULL,
+                currentBidPrice DECIMAL(10, 2),
+                status ENUM('live', 'sold', 'upcoming') NOT NULL,
+                startTime DATETIME NOT NULL,
+                endTime DATETIME NOT NULL,
+                userId INT,
+                FOREIGN KEY (userId) REFERENCES User(userId)
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS Product_img (
+                imageId INT AUTO_INCREMENT PRIMARY KEY,
+                productId INT,
+                imageURL VARCHAR(255) NOT NULL,
+                FOREIGN KEY (productId) REFERENCES Product(productId)
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS Cat_Prod (
+                categoryId INT,
+                productId INT,
+                PRIMARY KEY (categoryId, productId),
+                FOREIGN KEY (categoryId) REFERENCES Category(categoryId),
+                FOREIGN KEY (productId) REFERENCES Product(productId)
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS Bid (
+                bidId INT AUTO_INCREMENT PRIMARY KEY,
+                bidAmount DECIMAL(10, 2) NOT NULL,
+                bidTime DATETIME NOT NULL,
+                isWinningBid BOOLEAN DEFAULT FALSE,
+                userId INT,
+                productId INT,
+                FOREIGN KEY (userId) REFERENCES User(userId),
+                FOREIGN KEY (productId) REFERENCES Product(productId)
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS `Order` (
+                orderId INT AUTO_INCREMENT PRIMARY KEY,
+                orderDate DATETIME NOT NULL,
+                orderStatus ENUM('pending', 'confirmed', 'shipped', 'delivered', 'cancelled') NOT NULL,
+                paymentTime DATETIME,
+                paymentStatus ENUM('unpaid', 'paid') NOT NULL,
+                paymentMethod ENUM('credit_card', 'debit_card', 'paypal', 'bank_transfer') NOT NULL,
+                totalAmount DECIMAL(10, 2) NOT NULL,
+                transactionId VARCHAR(255),
+                userId INT,
+                productId INT,
+                FOREIGN KEY (userId) REFERENCES User(userId),
+                FOREIGN KEY (productId) REFERENCES Product(productId)
+            )
+            ''',
+            '''
+            CREATE TABLE IF NOT EXISTS Shipment (
+                shippingId INT AUTO_INCREMENT PRIMARY KEY,
+                shippingMethod VARCHAR(255) NOT NULL,
+                trackingNumber VARCHAR(255),
+                carrierName VARCHAR(255),
+                shippingStatus ENUM('pending', 'shipped', 'in_transit', 'delivered') NOT NULL,
+                shippingCost DECIMAL(10, 2),
+                estimatedDeliveryDate DATE,
+                houseFlatNo VARCHAR(255) NOT NULL,
+                street VARCHAR(255) NOT NULL,
+                city VARCHAR(255) NOT NULL,
+                pincode VARCHAR(10) NOT NULL,
+                orderId INT,
+                FOREIGN KEY (orderId) REFERENCES `Order`(orderId)
+            )
+            '''
+        ]
 
-class User(db.Model):
-    __tablename__ = 'User'
-    userId = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(255), nullable=False)
-    phone = db.Column(db.String(15))
-    email = db.Column(db.String(255), nullable=False, unique=True)
-    passwdHash = db.Column(db.String(255), nullable=False)
-    firstName = db.Column(db.String(255), nullable=False)
-    lastName = db.Column(db.String(255), nullable=False)
-    houseFlatNo = db.Column(db.String(255))
-    street = db.Column(db.String(255))
-    city = db.Column(db.String(255))
-    pincode = db.Column(db.String(10))
-    dateJoined = db.Column(db.DateTime, nullable=False)
-    isVerified = db.Column(db.Boolean, default=False)
+        for query in queries:
+            cursor.execute(query)
 
-    listed_products = db.relationship('Product', backref='product_owner', lazy=True, cascade='all, delete-orphan')
-    bids = db.relationship('Bid', backref='bidder', lazy=True)
-    reviews = db.relationship('Review', backref='reviewer', lazy=True, cascade='all, delete-orphan')
-    messages_sent = db.relationship('Messages', foreign_keys='Messages.sellerId', backref='seller', lazy=True, cascade='all, delete-orphan')
-    messages_received = db.relationship('Messages', foreign_keys='Messages.receiverId', backref='receiver', lazy=True, cascade='all, delete-orphan')
-    orders = db.relationship('Order', backref='user', lazy=True, cascade='all, delete-orphan')
-
-class Product(db.Model):
-    __tablename__ = 'Product'
-    productId = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(255), nullable=False)
-    description = db.Column(db.Text)
-    condition = db.Column(db.Enum('new', 'used', 'refurbished'), nullable=False)
-    initialBid = db.Column(db.Numeric(10, 2), nullable=False)
-    currentBidPrice = db.Column(db.Numeric(10, 2))
-    status = db.Column(db.Enum('active', 'sold', 'expired'), nullable=False)
-    startTime = db.Column(db.DateTime, nullable=False)
-    endTime = db.Column(db.DateTime, nullable=False)
-    userId = db.Column(db.Integer, db.ForeignKey('User.userId'), nullable=False)
-
-    images = db.relationship('ProductImage', backref='product', lazy=True, cascade='all, delete-orphan')
-    bids = db.relationship('Bid', backref='product', lazy=True, cascade='all, delete-orphan')
-    reviews = db.relationship('Review', backref='product', lazy=True, cascade='all, delete-orphan')
-    orders = db.relationship('Order', backref='product', lazy=True)
-    messages = db.relationship('Messages', backref='product', lazy=True, cascade='all, delete-orphan')
-
-class ProductImage(db.Model):
-    __tablename__ = 'Product_img'
-    imageId = db.Column(db.Integer, primary_key=True)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'), nullable=False)
-    imageURL = db.Column(db.String(255), nullable=False)
-
-class CatProd(db.Model):
-    __tablename__ = 'Cat_Prod'
-    categoryId = db.Column(db.Integer, db.ForeignKey('Category.categoryId'), primary_key=True)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'), primary_key=True)
-
-class Bid(db.Model):
-    __tablename__ = 'Bid'
-    bidId = db.Column(db.Integer, primary_key=True)
-    bidAmount = db.Column(db.Numeric(10, 2), nullable=False)
-    bidTime = db.Column(db.DateTime, nullable=False)
-    isWinningBid = db.Column(db.Boolean, default=False)
-    userId = db.Column(db.Integer, db.ForeignKey('User.userId'), nullable=False)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'), nullable=False)
-
-class Order(db.Model):
-    __tablename__ = 'Order'
-    orderId = db.Column(db.Integer, primary_key=True)
-    orderDate = db.Column(db.DateTime, nullable=False)
-    orderStatus = db.Column(db.Enum('pending', 'confirmed', 'shipped', 'delivered', 'cancelled'), nullable=False)
-    paymentTime = db.Column(db.DateTime)
-    paymentStatus = db.Column(db.Enum('unpaid', 'paid'), nullable=False)
-    paymentMethod = db.Column(db.Enum('credit_card', 'debit_card', 'paypal', 'bank_transfer'), nullable=False)
-    totalAmount = db.Column(db.Numeric(10, 2), nullable=False)
-    transactionId = db.Column(db.String(255))
-    userId = db.Column(db.Integer, db.ForeignKey('User.userId'), nullable=False)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'), nullable=False)
-
-    shipment = db.relationship('Shipment', backref='order', uselist=False, cascade='all, delete-orphan')
-
-class Shipment(db.Model):
-    __tablename__ = 'Shipment'
-    shippingId = db.Column(db.Integer, primary_key=True)
-    shippingMethod = db.Column(db.String(255), nullable=False)
-    trackingNumber = db.Column(db.String(255))
-    carrierName = db.Column(db.String(255))
-    shippingStatus = db.Column(db.Enum('pending', 'shipped', 'in_transit', 'delivered'), nullable=False)
-    shippingCost = db.Column(db.Numeric(10, 2))
-    estimatedDeliveryDate = db.Column(db.Date)
-    houseFlatNo = db.Column(db.String(255), nullable=False)
-    street = db.Column(db.String(255), nullable=False)
-    city = db.Column(db.String(255), nullable=False)
-    pincode = db.Column(db.String(10), nullable=False)
-    orderId = db.Column(db.Integer, db.ForeignKey('Order.orderId'), nullable=False)
-
-class Review(db.Model):
-    __tablename__ = 'Review'
-    reviewId = db.Column(db.Integer, primary_key=True)
-    rating = db.Column(db.Integer, nullable=False)
-    comment = db.Column(db.Text)
-    reviewDate = db.Column(db.DateTime, nullable=False)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'), nullable=False)
-    userId = db.Column(db.Integer, db.ForeignKey('User.userId'), nullable=False)
-
-class Messages(db.Model):
-    __tablename__ = 'Messages'
-    messageId = db.Column(db.Integer, primary_key=True)
-    sentTime = db.Column(db.DateTime, nullable=False)
-    readTime = db.Column(db.DateTime)
-    messageContent = db.Column(db.Text, nullable=False)
-    productId = db.Column(db.Integer, db.ForeignKey('Product.productId'))
-    sellerId = db.Column(db.Integer, db.ForeignKey('User.userId'))
-    receiverId = db.Column(db.Integer, db.ForeignKey('User.userId'))
+        connection.commit()
+    
+    except mysql.connector.Error as err:
+        print(f"Error: {err}")
+        return None
+    
+    finally:
+        cursor.close()
+        connection.close()

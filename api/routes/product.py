@@ -1,9 +1,8 @@
 from flask import request
 from flask_restful import Resource
-from api.models import db, Category, Product, ProductImage, CatProd, Bid
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from mysql.connector import Error
 from api.routes import api
-from sqlalchemy import func
+from api.models import create_connection
 
 # Resource for managing a single product
 class ProductResource(Resource):
@@ -11,24 +10,39 @@ class ProductResource(Resource):
         product_id = request.args.get('id')
         if not product_id:
             return {'error': 'Product ID is required'}, 400
-
+        
+        conn, cursor = None, None
         try:
-            product = Product.query.get_or_404(product_id)
-            product_data = {
-                'productId': product.productId,
-                'title': product.title,
-                'description': product.description,
-                'condition': product.condition,
-                'initialBid': float(product.initialBid),
-                'currentBidPrice': float(product.currentBidPrice),
-                'status': product.status,
-                'startTime': product.startTime.isoformat(),
-                'endTime': product.endTime.isoformat(),
-                'images': [{'imageURL': img.imageURL} for img in product.images]
-            }
-            return product_data
-        except Exception as e:
+            conn = create_connection()
+            cursor = conn.cursor(dictionary=True)
+            
+            cursor.execute('SELECT * FROM Product WHERE productId = %s', (product_id,))
+            product = cursor.fetchone()
+            
+            if not product:
+                return {'error': 'Product not found'}, 404
+            
+            cursor.execute('SELECT imageURL FROM Product_img WHERE productId = %s', (product_id,))
+            images = cursor.fetchall()
+            product['images'] = [{'imageURL': img['imageURL']} for img in images]
+            
+            return [{
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'condition': product['condition'],
+                    'initialBid': float(product['initialBid']),
+                    'currentBidPrice': float(product['currentBidPrice']),
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat(),
+                    'endTime': product['endTime'].isoformat(),
+                    'images': product['images']
+                }]
+        except Error as e:
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
 
     def put(self):
         product_id = request.args.get('id')
@@ -36,85 +50,104 @@ class ProductResource(Resource):
             return {'error': 'Product ID is required'}, 400
 
         data = request.get_json()
+
+        conn, cursor = None, None
         try:
-            product = Product.query.get_or_404(product_id)
-            
-            # Update product details with provided values or keep existing ones
-            product.title = data.get('title', product.title)
-            product.description = data.get('description', product.description)
-            product.condition = data.get('condition', product.condition)
-            product.initialBid = data.get('initialBid', product.initialBid)
-            product.status = data.get('status', product.status)
-            product.startTime = data.get('startTime', product.startTime)
-            product.endTime = data.get('endTime', product.endTime)
+            conn = create_connection()
+            cursor = conn.cursor()
 
-            # Update product images if provided
-            images = data.get('images', [])
-            if images:
-                ProductImage.query.filter_by(productId=product.productId).delete()
-                for image_url in images:
-                    new_product_img = ProductImage(productId=product.productId, imageURL=image_url)
-                    db.session.add(new_product_img)
+            # Update the product details
+            update_query = '''
+            UPDATE Product 
+            SET title = %s, description = %s, condition = %s, initialBid = %s, status = %s, startTime = %s, endTime = %s
+            WHERE productId = %s
+            '''
+            cursor.execute(update_query, (
+                data.get('title'),
+                data.get('description'),
+                data.get('condition'),
+                data.get('initialBid'),
+                data.get('status'),
+                data.get('startTime'),
+                data.get('endTime'),
+                product_id
+            ))
 
-            db.session.commit()
+            # Delete existing images and add new ones
+            if 'images' in data:
+                cursor.execute('DELETE FROM Product_img WHERE productId = %s', (product_id,))
+                for image_url in data['images']:
+                    cursor.execute('INSERT INTO Product_img (productId, imageURL) VALUES (%s, %s)', (product_id, image_url))
+
+            conn.commit()
             return {'message': 'Product updated successfully'}, 200
-        except IntegrityError:
-            db.session.rollback()
-            return {'error': 'Error updating product'}, 400
-        except Exception as e:
+        except Error as e:
+            conn.rollback()
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
 
     def delete(self):
         product_id = request.args.get('id')
         if not product_id:
             return {'error': 'Product ID is required'}, 400
 
+        conn, cursor = None, None
         try:
-            product = Product.query.get_or_404(product_id)
-            db.session.delete(product)
-            db.session.commit()
+            conn = create_connection()
+            cursor = conn.cursor()
+
+            cursor.execute('DELETE FROM Product WHERE productId = %s', (product_id,))
+            conn.commit()
+
             return {'message': 'Product deleted successfully'}, 200
-        except Exception as e:
+        except Error as e:
+            conn.rollback()
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
 
 #Create new product
 class ProductCreateResource(Resource):
     def post(self):
         data = request.get_json()
+
+        conn, cursor = None, None
         try:
-            new_product = Product(
-                title=data['title'],
-                description=data['description'],
-                condition=data['condition'],
-                initialBid=data['initialBid'],
-                status=data['status'],
-                startTime=data['startTime'],
-                endTime=data['endTime'],
-                userId=data['userId']
-            )
-            
-            categoryId = data['categoryId']
-            category = Category.query.get_or_404(categoryId)
+            conn = create_connection()
+            cursor = conn.cursor()
 
-            db.session.add(new_product)
-            db.session.commit()
+            # Insert product
+            insert_product_query = '''
+            INSERT INTO Product (title, description, condition, initialBid, status, startTime, endTime)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            '''
+            cursor.execute(insert_product_query, (
+                data['title'], data['description'], data['condition'], data['initialBid'],
+                data['status'], data['startTime'], data['endTime']
+            ))
+            new_product_id = cursor.lastrowid
 
-            CatProd_entry = CatProd(categoryId=categoryId, productId=new_product.productId)
-            db.session.add(CatProd_entry)
-            db.session.commit()
+            # Insert into CatProd
+            insert_catprod_query = 'INSERT INTO Cat_Prod (categoryId, productId) VALUES (%s, %s)'
+            cursor.execute(insert_catprod_query, (data['categoryId'], new_product_id))
 
+            # Insert product images if provided
             if 'images' in data:
                 for image_url in data['images']:
-                    new_product_img = ProductImage(productId=new_product.productId, imageURL=image_url)
-                    db.session.add(new_product_img)
-                db.session.commit()
+                    insert_image_query = 'INSERT INTO Product_img (productId, imageURL) VALUES (%s, %s)'
+                    cursor.execute(insert_image_query, (new_product_id, image_url))
 
+            conn.commit()
             return {'message': 'Product created successfully'}, 201
-        except IntegrityError:
-            db.session.rollback()
-            return {'error': 'Error creating product'}, 400
-        except Exception as e:
+        except Error as e:
+            conn.rollback()
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
 
 # Resource for listing products with optional filters
 class ProductListResource(Resource):
@@ -123,41 +156,62 @@ class ProductListResource(Resource):
         sort_by = request.args.get('sort_by', 'startTime')
         sort_order = request.args.get('sort_order', 'asc')
         limit = request.args.get('limit', default=5, type=int)  # Convert limit to integer
-
+        
+        conn, cursor = None, None
         try:
-            query = db.session.query(Product)
-            
+            conn = create_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # Build the base SQL query
+            query = "SELECT * FROM Product"
+            params = []
+
+            # Apply status filter if provided
             if status:
-                query = query.filter(Product.status == status)
-            
-            if sort_order == 'desc':
-                query = query.order_by(getattr(Product, sort_by).desc())
-            else:
-                query = query.order_by(getattr(Product, sort_by).asc())
+                query += " WHERE status = %s"
+                params.append(status)
 
-            if limit:
-                query = query.limit(limit)
-            
-            products = query.all()
-            products_list = [
-                {
-                    'productId': p.productId,
-                    'title': p.title,
-                    'description': p.description,
-                    'condition': p.condition,
-                    'initialBid': float(p.initialBid),
-                    'currentBidPrice': float(p.currentBidPrice),
-                    'status': p.status,
-                    'startTime': p.startTime.isoformat(),
-                    'endTime': p.endTime.isoformat(),
-                    'images': [{'imageURL': img.imageURL} for img in p.images]
-                } for p in products
-            ]
+            # Apply sorting
+            query += f" ORDER BY {sort_by} {sort_order.upper()}"
+
+            # Apply limit
+            query += " LIMIT %s"
+            params.append(limit)
+
+            # Execute the query
+            cursor.execute(query, tuple(params))
+            products = cursor.fetchall()
+
+            # Fetch product images for each product
+            products_list = []
+            for product in products:
+                cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product['productId'],))
+                images = cursor.fetchall()
+                product['images'] = [{'imageURL': img['imageURL']} for img in images]
+                products_list.append({
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'condition': product['condition'],
+                    'initialBid': float(product['initialBid']),
+                    'currentBidPrice': float(product['currentBidPrice']),
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat(),
+                    'endTime': product['endTime'].isoformat(),
+                    'images': product['images']
+                })
+
             return products_list
-        except Exception as e:
+        except Error as e:
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
 
-# Resource for managing products by category
+# Allowed sort fields and order for safety
+ALLOWED_SORT_FIELDS = {'startTime', 'endTime', 'title'}
+ALLOWED_SORT_ORDERS = {'asc', 'desc'}
+
 class CategoryProductsResource(Resource):
     def get(self):
         category_id = request.args.get('categoryId', None)
@@ -169,91 +223,253 @@ class CategoryProductsResource(Resource):
         if not category_id:
             return {'error': 'categoryId query parameter is required'}, 400
 
-        try:
-            query = db.session.query(Product).join(CatProd).filter(CatProd.categoryId == category_id)
-            
-            if status:
-                query = query.filter(Product.status == status)
-            
-            if sort_by:
-                column = getattr(Product, sort_by, None)
-                if column is None:
-                    return {'error': 'Invalid sortBy parameter'}, 400
-                if sort_order == 'desc':
-                    query = query.order_by(column.desc())
-                else:
-                    query = query.order_by(column.asc())
+        if sort_by not in ALLOWED_SORT_FIELDS:
+            return {'error': f"Invalid sortBy parameter. Allowed values are {', '.join(ALLOWED_SORT_FIELDS)}"}, 400
+        
+        if sort_order.lower() not in ALLOWED_SORT_ORDERS:
+            return {'error': f"Invalid sortOrder parameter. Allowed values are {', '.join(ALLOWED_SORT_ORDERS)}"}, 400
 
-            if limit:
-                query = query.limit(limit)
+        conn, cursor = None, None
+        try:
+            conn = create_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # Base SQL query for fetching products in a category
+            query = """
+                SELECT p.* 
+                FROM Product p
+                JOIN Cat_Prod cp ON p.productId = cp.productId
+                WHERE cp.categoryId = %s
+            """
+            params = [category_id]
+
+            # Add status filter if provided
+            if status:
+                query += " AND p.status = %s"
+                params.append(status)
+
+            # Apply sorting with validated parameters
+            query += f" ORDER BY {sort_by} {sort_order.upper()}"
+
+            # Apply limit
+            query += " LIMIT %s"
+            params.append(limit)
+
+            # Execute the query
+            cursor.execute(query, tuple(params))
+            products = cursor.fetchall()
+
+            # Fetch product images for each product
+            products_list = []
             
-            products = query.all()
-            products_list = [
-                {
-                    'productId': p.productId,
-                    'title': p.title,
-                    'description': p.description,
-                    'condition': p.condition,
-                    'initialBid': float(p.initialBid) if p.initialBid is not None else None,
-                    'currentBidPrice': float(p.currentBidPrice) if p.currentBidPrice is not None else None,
-                    'status': p.status,
-                    'startTime': p.startTime.isoformat() if p.startTime else None,
-                    'endTime': p.endTime.isoformat() if p.endTime else None,
-                    'images': [{'imageURL': img.imageURL} for img in p.images]
-                } for p in products
-            ]
+            def fetch_product_images(self, cursor, product_id):
+                cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product_id,))
+                images = cursor.fetchall()
+                return [{'imageURL': img['imageURL']} for img in images]
+            
+            for product in products:
+                product['images'] = fetch_product_images(cursor, product['productId'])
+                
+                products_list.append({
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'condition': product['condition'],
+                    'initialBid': float(product['initialBid']) if product['initialBid'] is not None else None,
+                    'currentBidPrice': float(product['currentBidPrice']) if product['currentBidPrice'] is not None else None,
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat() if product['startTime'] else None,
+                    'endTime': product['endTime'].isoformat() if product['endTime'] else None,
+                    'images': product['images']
+                })
 
             return products_list
-        except SQLAlchemyError as e:
-            # Handle SQLAlchemy-specific exceptions
+
+        except Error as e:
             return {'error': str(e)}, 500
-        except Exception as e:
-            # Handle general exceptions
-            return {'error': str(e)}, 500
-        
+
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+            
 class TrendingProducts(Resource):
     def get(self):
         # Get the number of products to return from query parameters, default to 2
         num_products = request.args.get('limit', default=2, type=int)
+
+        conn, cursor = None, None
         try:
-            # Query to get products with the highest number of bids
-            trending_products = (
-                db.session.query(Product, func.count(Bid.bidId).label('bid_count'))
-                .join(Bid, Product.productId == Bid.productId)
-                .group_by(Product.productId)
-                .order_by(func.count(Bid.bidId).desc())
-                .limit(num_products)
-                .all()
-            )
-            
+            conn = create_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            # SQL query to get products with the highest number of bids
+            query = """
+                SELECT p.*, COUNT(b.bidId) AS bid_count
+                FROM Product p
+                JOIN Bid b ON p.productId = b.productId
+                GROUP BY p.productId
+                ORDER BY bid_count DESC
+                LIMIT %s
+            """
+
+            # Execute the query with the limit parameter
+            cursor.execute(query, (num_products,))
+            trending_products = cursor.fetchall()
+
             # Prepare the response
             response = []
-            for product, bid_count in trending_products:
+            for product in trending_products:
+                cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product['productId'],))
+                images = cursor.fetchall()
+
                 response.append({
-                    'productId': product.productId,
-                    'title': product.title,
-                    'description': product.description,
-                    'bid_count': bid_count,
-                    'currentBidPrice': float(product.currentBidPrice) if product.currentBidPrice is not None else None,
-                    'condition': product.condition,
-                    'status': product.status,
-                    'startTime': product.startTime.isoformat() if product.startTime else None,
-                    'endTime': product.endTime.isoformat() if product.endTime else None,
-                    'userId': product.userId,
-                    'images': [{'imageURL': img.imageURL} for img in product.images]
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'bid_count': product['bid_count'],
+                    'currentBidPrice': float(product['currentBidPrice']) if product['currentBidPrice'] is not None else None,
+                    'condition': product['condition'],
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat() if product['startTime'] else None,
+                    'endTime': product['endTime'].isoformat() if product['endTime'] else None,
+                    'images': [{'imageURL': img['imageURL']} for img in images]
                 })
-            
+
             return response
-        except SQLAlchemyError as e:
-            # Handle SQLAlchemy-specific exceptions
+        except Error as e:
+            # Handle MySQL-specific exceptions
             return {'error': str(e)}, 500
         except Exception as e:
             # Handle general exceptions
             return {'error': str(e)}, 500
+        finally:
+            cursor.close()
+            conn.close()
+
+class LHTProducts(Resource):
+    def get(self):
+
+        conn, cursor = None, None  # Initialize outside try block
+        try:
+            conn = create_connection()  # Create connection
+            cursor = conn.cursor(dictionary=True)  # Create cursor
+
+            # Prepare the response
+            response = []
+
+            # Helper function to fetch images for a product
+            def fetch_images(product_id):
+                cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product_id,))
+                return [{'imageURL': img['imageURL']} for img in cursor.fetchall()]
+
+            # Fetch Trending Products
+            trending_query = """
+                SELECT p.*, COUNT(b.bidId) AS bid_count
+                FROM Product p
+                LEFT JOIN Bid b ON p.productId = b.productId
+                GROUP BY p.productId
+                ORDER BY bid_count DESC
+                LIMIT 10
+            """
+            cursor.execute(trending_query)
+            trending_products = cursor.fetchall()
+
+            trending_sub = []
+            for product in trending_products:
+                images = fetch_images(product['productId'])
+                trending_sub.append({
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'bid_count': product['bid_count'],
+                    'currentBidPrice': float(product['currentBidPrice']) if product['currentBidPrice'] is not None else None,
+                    'condition': product['condition'],
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat() if product['startTime'] else None,
+                    'endTime': product['endTime'].isoformat() if product['endTime'] else None,
+                    'images': images
+                })
+
+            response.append({'trending': trending_sub})
+
+            # Fetch Products with Highest Bids
+            high_bid_query = """
+                SELECT p.*, MAX(b.bidAmount) AS highest_bid
+                FROM Product p
+                LEFT JOIN Bid b ON p.productId = b.productId
+                GROUP BY p.productId
+                ORDER BY highest_bid DESC
+                LIMIT 8
+            """
+            cursor.execute(high_bid_query)
+            high_bid_products = cursor.fetchall()
+
+            high_bid_sub = []
+            for product in high_bid_products:
+                images = fetch_images(product['productId'])
+                high_bid_sub.append({
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'highest_bid': float(product['highest_bid']) if product['highest_bid'] is not None else None,
+                    'currentBidPrice': float(product['currentBidPrice']) if product['currentBidPrice'] is not None else None,
+                    'condition': product['condition'],
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat() if product['startTime'] else None,
+                    'endTime': product['endTime'].isoformat() if product['endTime'] else None,
+                    'images': images
+                })
+
+            response.append({'highBids': high_bid_sub})
+
+            # Fetch Live Auctions
+            live_auction_query = """
+                SELECT *
+                FROM Product
+                WHERE status = 'live'
+                ORDER BY startTime
+                LIMIT 10
+            """
+            cursor.execute(live_auction_query)
+            live_auction_products = cursor.fetchall()
+
+            live_sub = []
+            for product in live_auction_products:
+                images = fetch_images(product['productId'])
+                live_sub.append({
+                    'productId': product['productId'],
+                    'title': product['title'],
+                    'description': product['description'],
+                    'currentBidPrice': float(product['currentBidPrice']) if product['currentBidPrice'] is not None else None,
+                    'condition': product['condition'],
+                    'status': product['status'],
+                    'startTime': product['startTime'].isoformat() if product['startTime'] else None,
+                    'endTime': product['endTime'].isoformat() if product['endTime'] else None,
+                    'images': images
+                })
+
+            response.append({'live': live_sub})
+
+            return response, 200
+
+        except Error as e:
+            return {'error': str(e)}, 500
+        except Exception as e:
+            return {'error': str(e)}, 500
+        finally:
+            # Ensure cursor and connection are closed if they were created
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
 # Register resources with the API
 api.add_resource(ProductResource, '/api/v2/products/product')   #id
 api.add_resource(ProductListResource, '/api/v2/products')   #status,limit for getting list of products of specified status
 api.add_resource(ProductCreateResource, '/api/v2/products/create')    #POST for creating product
 api.add_resource(CategoryProductsResource, '/api/v2/categories/products')   #categoryId, sortBy=currentBidPrice, sortOrder=desc (default asc)
+                                                                            #limit, status
 api.add_resource(TrendingProducts, '/api/v2/products/trending')    #limit
+api.add_resource(LHTProducts, '/api/products/lht')
