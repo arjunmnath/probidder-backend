@@ -1,7 +1,7 @@
 import os
 from flask import Flask
-from api.routes import appbp
-from api.models import create_tables
+from routes import appbp
+from models import create_tables
 
 app = Flask(__name__)
 

@@ -2,8 +2,9 @@ from flask import request, jsonify
 from flask_restful import Resource
 from mysql.connector import Error
 from werkzeug.security import generate_password_hash, check_password_hash
-from api.models import create_connection
-from api.routes import api
+from models import create_connection
+from routes import api
+from datetime import datetime
 
 # User Registration Resource
 class UserRegistration(Resource):
@@ -19,7 +20,7 @@ class UserRegistration(Resource):
             conn = create_connection()
             cursor = conn.cursor()
             # Check if username or email already exists
-            cursor.execute("SELECT userId FROM users WHERE username = %s OR email = %s", (username, email))
+            cursor.execute("SELECT userId FROM User WHERE username = %s OR email = %s", (username, email))
             if cursor.fetchone():
                 return {'error': 'Username or email already exists'}, 400
 
@@ -29,7 +30,7 @@ class UserRegistration(Resource):
             # Create a new user instance
             cursor.execute(
                 """
-                INSERT INTO users (username, phone, email, passwdHash, firstName, lastName, 
+                INSERT INTO User (username, phone, email, passwdHash, firstName, lastName, 
                                    houseFlatNo, street, city, pincode, dateJoined, isVerified) 
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
@@ -59,7 +60,7 @@ class UserLogin(Resource):
 
             conn = create_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT userId, passwdHash FROM users WHERE email = %s", (email,))
+            cursor.execute("SELECT userId, passwdHash FROM User WHERE email = %s", (email,))
             user = cursor.fetchone()
             if user and check_password_hash(user[1], password):
                 return {'message': 'Login successful', 'userId': user[0]}, 200
@@ -70,50 +71,65 @@ class UserLogin(Resource):
             cursor.close()
             conn.close()
 
-# User Details Resource
+# Resource for managing user details
 class UserDetails(Resource):
     def get(self):
         user_id = request.args.get('userId')
-        conn, cursor = None, None
+        if not user_id:
+            return {'error': 'User ID is required'}, 400
         
+        conn, cursor = None, None
         try:
             conn = create_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users WHERE userId = %s", (user_id,))
+            cursor = conn.cursor(dictionary=True)
+            
+            cursor.execute("SELECT * FROM User WHERE userId = %s", (user_id,))
             user = cursor.fetchone()
             if not user:
                 return {'error': 'User not found'}, 404
             
+            # Format the dateJoined if it's a datetime object
+            date_joined = user['dateJoined']
+            if isinstance(date_joined, str):
+                date_joined = datetime.fromisoformat(date_joined)
+
             user_details = {
-                'userId': user[0],
-                'username': user[1],
-                'phone': user[2],
-                'email': user[3],
-                'firstName': user[4],
-                'lastName': user[5],
-                'houseFlatNo': user[6],
-                'street': user[7],
-                'city': user[8],
-                'pincode': user[9],
-                'dateJoined': user[10].isoformat() if user[10] else None,
-                'isVerified': user[11]
+                'userId': user['userId'],
+                'username': user['username'],
+                'phone': user['phone'],
+                'email': user['email'],
+                'firstName': user['firstName'],
+                'lastName': user['lastName'],
+                'houseFlatNo': user['houseFlatNo'],
+                'street': user['street'],
+                'city': user['city'],
+                'pincode': user['pincode'],
+                'dateJoined': date_joined.isoformat() if isinstance(date_joined, datetime) else None,
+                'isVerified': user['isVerified']
             }
             return user_details, 200
         except Error as e:
             return {'error': str(e)}, 500
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
-    def put(self, user_id):
+    def put(self):
+        user_id = request.args.get('userId')
+        if not user_id:
+            return {'error': 'User ID is required'}, 400
+
+        data = request.get_json()
+
         conn, cursor = None, None
-        
         try:
-            data = request.get_json()
-
             conn = create_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT userId FROM users WHERE userId = %s", (user_id,))
+
+            # Check if user exists
+            cursor.execute("SELECT userId FROM User WHERE userId = %s", (user_id,))
             if cursor.fetchone() is None:
                 return {'error': 'User not found'}, 404
             
@@ -122,49 +138,70 @@ class UserDetails(Resource):
             email = data.get('email')
 
             # Check if username or email already exists
-            cursor.execute("SELECT userId FROM users WHERE (username = %s OR email = %s) AND userId != %s",
+            cursor.execute("SELECT userId FROM User WHERE (username = %s OR email = %s) AND userId != %s",
                            (username, email, user_id))
             if cursor.fetchone():
                 return {'error': 'Username or email already exists'}, 400
             
-            cursor.execute(
-                """
-                UPDATE users 
-                SET username = %s, email = %s, phone = %s, firstName = %s, lastName = %s, 
-                    houseFlatNo = %s, street = %s, city = %s, pincode = %s, dateJoined = %s, 
-                    isVerified = %s 
-                WHERE userId = %s
-                """,
-                (username, email, data.get('phone'), data.get('firstName'), data.get('lastName'),
-                 data.get('houseFlatNo'), data.get('street'), data.get('city'), data.get('pincode'),
-                 data.get('dateJoined'), data.get('isVerified'), user_id)
-            )
+            update_query = '''
+            UPDATE User 
+            SET username = %s, email = %s, phone = %s, firstName = %s, lastName = %s, 
+                houseFlatNo = %s, street = %s, city = %s, pincode = %s, 
+                isVerified = %s 
+            WHERE userId = %s
+            '''
+            cursor.execute(update_query, (
+                username,
+                email,
+                data.get('phone'),
+                data.get('firstName'),
+                data.get('lastName'),
+                data.get('houseFlatNo'),
+                data.get('street'),
+                data.get('city'),
+                data.get('pincode'),
+                data.get('isVerified'),
+                user_id
+            ))
+
             conn.commit()
             return {'message': 'User details updated successfully'}, 200
         except Error as e:
+            conn.rollback()
             return {'error': str(e)}, 500
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
-    def delete(self, user_id):
+    def delete(self):
+        user_id = request.args.get('userId')
+        if not user_id:
+            return {'error': 'User ID is required'}, 400
+
         conn, cursor = None, None
-        
         try:
             conn = create_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT userId FROM users WHERE userId = %s", (user_id,))
+
+            # Check if user exists before deletion
+            cursor.execute("SELECT userId FROM User WHERE userId = %s", (user_id,))
             if cursor.fetchone() is None:
                 return {'error': 'User not found'}, 404
-            
-            cursor.execute("DELETE FROM users WHERE userId = %s", (user_id,))
+
+            cursor.execute("DELETE FROM User WHERE userId = %s", (user_id,))
             conn.commit()
+
             return {'message': 'User deleted successfully'}, 200
         except Error as e:
+            conn.rollback()
             return {'error': str(e)}, 500
         finally:
-            cursor.close()
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
 
 # Register Resources with Flask-RESTful
 api.add_resource(UserRegistration, '/api/v2/register')

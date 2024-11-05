@@ -1,8 +1,8 @@
 from flask import request
 from flask_restful import Resource
 from mysql.connector import Error
-from api.routes import api
-from api.models import create_connection
+from routes import api
+from models import create_connection
 
 # Resource for managing a single product
 class ProductResource(Resource):
@@ -214,7 +214,7 @@ ALLOWED_SORT_ORDERS = {'asc', 'desc'}
 
 class CategoryProductsResource(Resource):
     def get(self):
-        category_id = request.args.get('categoryId', None)
+        category_id = request.args.get('categoryId', default=None, type=int)
         status = request.args.get('status', 'active')
         sort_by = request.args.get('sortBy', 'startTime')
         sort_order = request.args.get('sortOrder', 'asc')
@@ -243,32 +243,38 @@ class CategoryProductsResource(Resource):
             """
             params = [category_id]
 
-            # Add status filter if provided
-            if status:
-                query += " AND p.status = %s"
-                params.append(status)
+            # # Add status filter if provided
+            # if status:
+            #     query += " AND p.status = %s"
+            #     params.append(status)
 
-            # Apply sorting with validated parameters
-            query += f" ORDER BY {sort_by} {sort_order.upper()}"
+            # # Apply sorting with validated parameters
+            # query += f" ORDER BY {sort_by} {sort_order.upper()}"
 
-            # Apply limit
-            query += " LIMIT %s"
-            params.append(limit)
+            # # Apply limit
+            # query += " LIMIT %s"
+            # params.append(limit)
+
+            # Debug: Print the final SQL query and parameters
+            print(f"Executing Query: {query} with params: {params}")
 
             # Execute the query
             cursor.execute(query, tuple(params))
             products = cursor.fetchall()
 
+            # Debug: Check fetched products
+            print(f"Fetched Products: {products}")
+
+            # Check if products are found
+            if not products:
+                return {'message': 'No products found for the specified category'}, 404
+
             # Fetch product images for each product
             products_list = []
             
-            def fetch_product_images(self, cursor, product_id):
-                cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product_id,))
-                images = cursor.fetchall()
-                return [{'imageURL': img['imageURL']} for img in images]
-            
             for product in products:
-                product['images'] = fetch_product_images(cursor, product['productId'])
+                # Corrected method call
+                product['images'] = self.fetch_product_images(cursor, product['productId'])
                 
                 products_list.append({
                     'productId': product['productId'],
@@ -283,7 +289,7 @@ class CategoryProductsResource(Resource):
                     'images': product['images']
                 })
 
-            return products_list
+            return products_list, 200
 
         except Error as e:
             return {'error': str(e)}, 500
@@ -293,7 +299,12 @@ class CategoryProductsResource(Resource):
                 cursor.close()
             if conn:
                 conn.close()
-            
+
+    def fetch_product_images(self, cursor, product_id):
+        cursor.execute("SELECT imageURL FROM Product_img WHERE productId = %s", (product_id,))
+        images = cursor.fetchall()
+        return [{'imageURL': img['imageURL']} for img in images]
+                  
 class TrendingProducts(Resource):
     def get(self):
         # Get the number of products to return from query parameters, default to 2
