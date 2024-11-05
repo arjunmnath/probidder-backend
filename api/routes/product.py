@@ -215,7 +215,7 @@ ALLOWED_SORT_ORDERS = {'asc', 'desc'}
 class CategoryProductsResource(Resource):
     def get(self):
         category_id = request.args.get('categoryId', default=None, type=int)
-        status = request.args.get('status', 'active')
+        status = request.args.get('status', 'live')
         sort_by = request.args.get('sortBy', 'startTime')
         sort_order = request.args.get('sortOrder', 'asc')
         limit = request.args.get('limit', default=5, type=int)  # Convert limit to integer
@@ -243,17 +243,17 @@ class CategoryProductsResource(Resource):
             """
             params = [category_id]
 
-            # # Add status filter if provided
-            # if status:
-            #     query += " AND p.status = %s"
-            #     params.append(status)
+            # Add status filter if provided
+            if status:
+                query += " AND p.status = %s"
+                params.append(status)
 
-            # # Apply sorting with validated parameters
-            # query += f" ORDER BY {sort_by} {sort_order.upper()}"
+            # Apply sorting with validated parameters
+            query += f" ORDER BY {sort_by} {sort_order.upper()}"
 
-            # # Apply limit
-            # query += " LIMIT %s"
-            # params.append(limit)
+            # Apply limit
+            query += " LIMIT %s"
+            params.append(limit)
 
             # Debug: Print the final SQL query and parameters
             print(f"Executing Query: {query} with params: {params}")
