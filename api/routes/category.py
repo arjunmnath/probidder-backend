@@ -17,7 +17,9 @@ class Category(Resource):
             # Check if the category already exists
             connection = create_connection()
             cursor = connection.cursor(dictionary=True)
+            
             cursor.execute("SELECT * FROM Category WHERE categoryName = %s", (category_name,))
+            
             existing_category = cursor.fetchone()
             if existing_category:
                 return {'message': 'Category already exists'}, 400
@@ -25,7 +27,8 @@ class Category(Resource):
             # Insert a new category
             cursor.execute("INSERT INTO Category (categoryName) VALUES (%s)", (category_name,))
             connection.commit()
-            return jsonify({'message': 'Category added successfully', 'categoryId': cursor.lastrowid}), 201
+
+            return {'message': 'Category added successfully', 'categoryId': cursor.lastrowid}, 201
         except Error as e:
             return {'error': str(e)}, 500
         finally:
@@ -33,12 +36,17 @@ class Category(Resource):
             connection.close()
 
     def get(self):
+        limit = request.args.get('limit', default=10, type=int)
+        offset = request.args.get('offset', default=0, type=int)
+
         try:
             connection = create_connection()
             cursor = connection.cursor(dictionary=True)
-            cursor.execute("SELECT * FROM Category")
+            
+            cursor.execute("SELECT * FROM Category LIMIT %s OFFSET %s", (limit, offset))
             categories = cursor.fetchall()
-            return jsonify(categories), 200
+
+            return categories, 200
         except Error as e:
             return {'error': str(e)}, 500
         finally:
@@ -51,11 +59,14 @@ class CategoryDetail(Resource):
         try:
             connection = create_connection()
             cursor = connection.cursor(dictionary=True)
+            
             cursor.execute("SELECT * FROM Category WHERE categoryId = %s", (category_id,))
             category = cursor.fetchone()
+            
             if not category:
                 return {'error': 'Category not found'}, 404
-            return jsonify(category), 200
+            
+            return category, 200
         except Error as e:
             return {'error': str(e)}, 500
         finally:
@@ -73,6 +84,7 @@ class CategoryDetail(Resource):
             
             connection = create_connection()
             cursor = connection.cursor()
+            
             cursor.execute("UPDATE Category SET categoryName = %s WHERE categoryId = %s", (category_name, category_id))
             connection.commit()
 
